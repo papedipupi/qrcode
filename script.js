@@ -1,5 +1,6 @@
 document.addEventListener('DOMContentLoaded', () => {
     let originalData = [];
+    let rawData = [];  // To store the raw data
 
     document.getElementById('process').addEventListener('click', () => {
         const fileInput = document.getElementById('csv-file');
@@ -14,12 +15,17 @@ document.addEventListener('DOMContentLoaded', () => {
         Papa.parse(file, {
             header: true,
             complete: function (results) {
-                const data = results.data;
+                rawData = results.data;  // Store the raw data
+                const data = results.data.map(row => ({
+                    ...row,
+                    'Date/time': convertUKtoET(row['Date/time'], row)
+                }));
                 originalData = data;
                 processData(data);
                 document.getElementById('download').style.display = 'block';
                 document.getElementById('filter-dates').style.display = 'block';
                 setupDatePickers(data);
+                generateProcessedDataTable(data);
             },
             error: function (error) {
                 logMessage(`Error parsing CSV file: ${error.message}`, true);
@@ -41,11 +47,13 @@ document.addEventListener('DOMContentLoaded', () => {
             return rowDate >= startDate && rowDate <= endDate;
         });
 
-        processData(filteredData);
+        processData(filteredData, startDate, endDate);
     });
 
     document.getElementById('download').addEventListener('click', () => {
         const workbook = XLSX.utils.book_new();
+
+        // First Sheet: 4 Tables
         const sheetData = [];
         let currentRow = 0;
 
@@ -55,10 +63,42 @@ document.addEventListener('DOMContentLoaded', () => {
         currentRow = appendTableToSheetData(sheetData, currentRow, 'Scans by Top 5 Cities', 'City', 'Scans', '%', document.querySelector('h2:nth-of-type(3) + table'));
         currentRow = appendTableToSheetData(sheetData, currentRow, 'Scans by Top 5 Countries', 'Country', 'Scans', '%', document.querySelector('h2:nth-of-type(4) + table'));
 
-        const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
-        applyStyles(worksheet, sheetData);
+        const tablesWorksheet = XLSX.utils.aoa_to_sheet(sheetData);
+        applyStyles(tablesWorksheet, sheetData);
+        XLSX.utils.book_append_sheet(workbook, tablesWorksheet, 'QR Code Scans Data');
 
-        XLSX.utils.book_append_sheet(workbook, worksheet, 'QR Code Scans Data');
+        // Second Sheet: Processed Data
+        const processedDataSheetData = [['Date/time', 'Country Name', 'Country ISO', 'City', 'Device', 'Operating System', 'Unique Visitor']];
+        originalData.forEach(row => {
+            processedDataSheetData.push([
+                row['Date/time'],
+                row['Country Name'],
+                row['Country ISO'],
+                row['City'],
+                row['Device'],
+                row['Operating System'],
+                row['Unique Visitor']
+            ]);
+        });
+        const processedDataSheet = XLSX.utils.aoa_to_sheet(processedDataSheetData);
+        XLSX.utils.book_append_sheet(workbook, processedDataSheet, 'Processed Data');
+
+        // Third Sheet: Raw Data
+        const rawDataSheetData = [['Date/time', 'Country Name', 'Country ISO', 'City', 'Device', 'Operating System', 'Unique Visitor']];
+        rawData.forEach(row => {
+            rawDataSheetData.push([
+                row['Date/time'],
+                row['Country Name'],
+                row['Country ISO'],
+                row['City'],
+                row['Device'],
+                row['Operating System'],
+                row['Unique Visitor']
+            ]);
+        });
+        const rawDataSheet = XLSX.utils.aoa_to_sheet(rawDataSheetData);
+        XLSX.utils.book_append_sheet(workbook, rawDataSheet, 'Raw Data');
+
         XLSX.writeFile(workbook, 'qr_code_scans_data.xlsx');
         logMessage(`Excel file 'qr_code_scans_data.xlsx' has been downloaded.`);
 
@@ -129,13 +169,13 @@ function applyStyles(worksheet, sheetData) {
     }
 }
 
-function processData(data) {
-    const tablesHTML = generateTables(data);
+function processData(data, startDate = null, endDate = null) {
+    const tablesHTML = generateTables(data, startDate, endDate);
     document.getElementById('tables-container').innerHTML = tablesHTML;
 }
 
-function generateTables(data) {
-    const dailyScansTable = generateDailyScansTable(data);
+function generateTables(data, startDate, endDate) {
+    const dailyScansTable = generateDailyScansTable(data, startDate, endDate);
     const osScansTable = generateOSScansTable(data);
     const cityScansTable = generateCityScansTable(data);
     const countryScansTable = generateCountryScansTable(data);
@@ -147,7 +187,7 @@ function generateTables(data) {
     `;
 }
 
-function generateDailyScansTable(data) {
+function generateDailyScansTable(data, startDate, endDate) {
     let dateCounts = {};
     let uniqueCounts = {};
 
@@ -159,8 +199,6 @@ function generateDailyScansTable(data) {
             logMessage(`Row data: ${JSON.stringify(row)}`);
             return; // Skip invalid dates
         }
-        logMessage(`Processing date: ${dateString}`);
-        logMessage(`Row data: ${JSON.stringify(row)}`);
         const dateKey = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
 
         dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
@@ -169,11 +207,11 @@ function generateDailyScansTable(data) {
         }
     });
 
-    const dateKeys = Object.keys(dateCounts).sort((a, b) => new Date(a) - new Date(b));
-    let startDate = new Date(dateKeys[0]);
-    let endDate = new Date(dateKeys[dateKeys.length - 1]);
-    startDate.setHours(0, 0, 0, 0); // Ensure time is at start of the day
-    endDate.setHours(23, 59, 59, 999); // Ensure time is at the end of the day
+    if (!startDate || !endDate) {
+        const dateKeys = Object.keys(dateCounts).sort((a, b) => new Date(a) - new Date(b));
+        startDate = new Date(dateKeys[0]);
+        endDate = new Date(dateKeys[dateKeys.length - 1]);
+    }
     const daysDifference = (endDate - startDate) / (1000 * 60 * 60 * 24) + 1;
 
     if (daysDifference > 35) {
@@ -182,29 +220,14 @@ function generateDailyScansTable(data) {
 
         let startOfWeek = new Date(startDate);
         let endOfWeek = new Date(startOfWeek);
-        endOfWeek.setDate(startOfWeek.getDate() + (6 - startOfWeek.getDay()));
+        endOfWeek.setDate(startOfWeek.getDate() + 6); // Add 7 days (start date to end date)
 
-        const firstWeekKey = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}`;
-        let totalScans = 0;
-        let totalUnique = 0;
-        for (let d = new Date(startDate); d <= endOfWeek; d.setDate(d.getDate() + 1)) {
-            const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
-            totalScans += (dateCounts[key] || 0);
-            totalUnique += (uniqueCounts[key] || 0);
-        }
-        weekCounts[firstWeekKey] = totalScans;
-        weekUniqueCounts[firstWeekKey] = totalUnique;
-
-        startDate = new Date(endOfWeek);
-        startDate.setDate(startDate.getDate() + 1);
-        while (startDate <= endDate) {
-            startOfWeek = new Date(startDate);
-            endOfWeek = new Date(startOfWeek);
-            endOfWeek.setDate(startOfWeek.getDate() + 6);
-
+        while (startOfWeek <= endDate) {
             let weekKey;
             if (endOfWeek <= endDate) {
                 weekKey = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })} - ${endOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}`;
+            } else if (startOfWeek === endOfWeek) {
+                weekKey = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}`;
             } else {
                 weekKey = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}`;
             }
@@ -219,11 +242,13 @@ function generateDailyScansTable(data) {
             weekCounts[weekKey] = totalScans;
             weekUniqueCounts[weekKey] = totalUnique;
 
-            startDate = new Date(endOfWeek);
-            startDate.setDate(startDate.getDate() + 1);
+            startOfWeek = new Date(endOfWeek);
+            startOfWeek.setDate(startOfWeek.getDate() + 1);
+            endOfWeek = new Date(startOfWeek);
+            endOfWeek.setDate(startOfWeek.getDate() + 6);
         }
 
-        const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
+           const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
         const totalUniqueScansOverall = Object.values(weekUniqueCounts).reduce((a, b) => a + b, 0);
 
         let table = '<table><thead><tr><th>Date</th><th>Total Scans</th><th>Unique Scans</th></tr></thead><tbody>';
@@ -235,12 +260,14 @@ function generateDailyScansTable(data) {
         logMessage(`Generated weekly scans table with total scans: ${totalScansOverall} and total unique scans: ${totalUniqueScansOverall}`);
         return table;
     } else {
-        const totalScans = Object.values(dateCounts).reduce((a, b) => a + b, 0);
-        const totalUniqueScans = Object.values(uniqueCounts).reduce((a, b) => a + b, 0);
+        const dailyCounts = appendMissingDays(dateCounts, uniqueCounts, startDate, endDate);
+
+        const totalScans = Object.values(dailyCounts).reduce((a, b) => a + b.total, 0);
+        const totalUniqueScans = Object.values(dailyCounts).reduce((a, b) => a + b.unique, 0);
 
         let table = '<table><thead><tr><th>Date</th><th>Total Scans</th><th>Unique Scans</th></tr></thead><tbody>';
-        dateKeys.forEach(date => {
-            table += `<tr><td>${date}</td><td>${dateCounts[date]}</td><td>${uniqueCounts[date] || 0}</td></tr>`;
+        Object.keys(dailyCounts).forEach(date => {
+            table += `<tr><td>${date}</td><td>${dailyCounts[date].total}</td><td>${dailyCounts[date].unique}</td></tr>`;
         });
         table += `<tr class="total"><td>Total</td><td>${totalScans}</td><td>${totalUniqueScans}</td></tr>`;
         table += '</tbody></table>';
@@ -320,9 +347,25 @@ function convertUKtoET(ukTimeString, row) {
         logMessage(`Row data: ${JSON.stringify(row)}`);
         return ukTimeString;  // Return original if invalid date
     }
-    const etOffset = -5 * 60; // ET is UTC-5
-    const etDate = new Date(ukDate.getTime() + etOffset * 60 * 1000);
-    return etDate.toISOString().slice(0, 19).replace('T', ' '); // Format as 'YYYY-MM-DD HH:MM:SS'
+    const hoursOffset = -5; // Adjusting time by deducting 5 hours for standard time difference
+    const etDate = new Date(ukDate.getTime() + hoursOffset * 60 * 60 * 1000);
+    const etTimeString = etDate.toISOString().slice(0, 19).replace('T', ' '); // Format as 'YYYY-MM-DD HH:MM:SS'
+    
+    // Log the conversion to the conversion log container
+    logConversionMessage(`UK Time: ${ukTimeString} => ET Time: ${etTimeString}`);
+    
+    return etTimeString;
+}
+
+function convertETtoUK(etTimeString) {
+    const etDate = new Date(etTimeString);
+    if (isNaN(etDate)) {
+        logMessage(`Invalid ET time string encountered: ${etTimeString}`, true);
+        return etTimeString;  // Return original if invalid date
+    }
+    const hoursOffset = 5; // Adjusting time by adding 5 hours for standard time difference
+    const ukDate = new Date(etDate.getTime() + hoursOffset * 60 * 60 * 1000);
+    return ukDate.toISOString().slice(0, 19).replace('T', ' ');
 }
 
 function logMessage(message, isError = false) {
@@ -334,25 +377,73 @@ function logMessage(message, isError = false) {
     console.log(message);
 }
 
+function logConversionMessage(message) {
+    const conversionLogContainer = document.getElementById('conversion-log-container');
+    const logEntry = document.createElement('p');
+    logEntry.textContent = message;
+    logEntry.style.color = 'blue'; // Different color for conversion log
+    conversionLogContainer.appendChild(logEntry);
+    console.log(message);
+}
+
 function setupDatePickers(data) {
     const dateStrings = data.map(row => row['Date/time']).filter(date => !isNaN(new Date(date)));
     const dates = dateStrings.map(dateString => new Date(dateString));
     const minDate = new Date(Math.min(...dates));
     const maxDate = new Date(Math.max(...dates));
 
+    const earliestPossibleDate = new Date(minDate);
+    earliestPossibleDate.setDate(earliestPossibleDate.getDate() - 34); // Allow selection of up to 34 days before the data starts
+
+    const latestPossibleDate = new Date(maxDate);
+    latestPossibleDate.setDate(latestPossibleDate.getDate() + 34); // Allow selection of up to 34 days after the data ends
+
     flatpickr("#start-date", {
         defaultDate: minDate,
-        minDate: minDate,
-        maxDate: maxDate,
+        minDate: earliestPossibleDate,
+        maxDate: latestPossibleDate,
         dateFormat: "Y-m-d"
     });
 
     flatpickr("#end-date", {
         defaultDate: maxDate,
-        minDate: minDate,
-        maxDate: maxDate,
+        minDate: earliestPossibleDate,
+        maxDate: latestPossibleDate,
         dateFormat: "Y-m-d"
     });
+}
+
+function appendMissingDays(dateCounts, uniqueCounts, startDate, endDate) {
+    const dailyCounts = {};
+    for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+        const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
+        dailyCounts[key] = {
+            total: dateCounts[key] || 0,
+            unique: uniqueCounts[key] || 0
+        };
+    }
+    return dailyCounts;
+}
+
+function generateProcessedDataTable(data) {
+    let table = '<h2>Processed Data</h2><table><thead><tr>';
+    const headers = ['Date/time', 'Country Name', 'Country ISO', 'City', 'Device', 'Operating System', 'Unique Visitor'];
+    headers.forEach(header => {
+        table += `<th>${header}</th>`;
+    });
+    table += '</tr></thead><tbody>';
+
+    data.forEach(row => {
+        table += '<tr>';
+        headers.forEach(header => {
+            table += `<td>${row[header]}</td>`;
+        });
+        table += '</tr>';
+    });
+
+    table += '</tbody></table>';
+    document.getElementById('processed-data-table').innerHTML = table;
+    logMessage(`Generated processed data table with ${data.length} rows.`);
 }
 
 logMessage("Script loaded successfully.");
