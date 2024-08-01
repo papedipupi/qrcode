@@ -42,6 +42,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Adjust endDate to make it inclusive for filtering
+        endDate.setHours(23, 59, 59, 999);
+
         const filteredData = originalData.filter(row => {
             const rowDate = new Date(row['Date/time']);
             return rowDate >= startDate && rowDate <= endDate;
@@ -248,7 +251,7 @@ function generateDailyScansTable(data, startDate, endDate) {
             endOfWeek.setDate(startOfWeek.getDate() + 6);
         }
 
-         const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
+       const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
         const totalUniqueScansOverall = Object.values(weekUniqueCounts).reduce((a, b) => a + b, 0);
 
         let table = '<table><thead><tr><th>Date</th><th>Total Scans</th><th>Unique Scans</th></tr></thead><tbody>';
