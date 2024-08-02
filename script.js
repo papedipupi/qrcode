@@ -251,7 +251,7 @@ function generateDailyScansTable(data, startDate, endDate) {
             endOfWeek.setDate(startOfWeek.getDate() + 6);
         }
 
-       const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
+        const totalScansOverall = Object.values(weekCounts).reduce((a, b) => a + b, 0);
         const totalUniqueScansOverall = Object.values(weekUniqueCounts).reduce((a, b) => a + b, 0);
 
         let table = '<table><thead><tr><th>Date</th><th>Total Scans</th><th>Unique Scans</th></tr></thead><tbody>';
