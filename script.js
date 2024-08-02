@@ -235,7 +235,7 @@ function generateDailyScansTable(data, startDate, endDate) {
                 weekKey = `${startOfWeek.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })} - ${endDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' })}`;
             }
 
-            let totalScans = 0;
+              let totalScans = 0;
             let totalUnique = 0;
             for (let d = new Date(startOfWeek); d <= (endOfWeek <= endDate ? endOfWeek : endDate); d.setDate(d.getDate() + 1)) {
                 const key = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: '2-digit' });
