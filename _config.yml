@@ -1,0 +1,11 @@
+title: Papedipupi's Jekyll Site
+description: >-
+  My awesome Jekyll site hosted on GitHub Pages.
+baseurl: "" # Leave this empty if your site is at the root of your domain
+url: "https://papedipupi.github.io" # Base URL for your site
+theme: minima
+
+# Build settings
+markdown: kramdown
+source: .
+destination: ./_site
